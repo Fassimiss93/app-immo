@@ -1,4 +1,5 @@
 import json
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -6,6 +7,10 @@ import pandas as pd
 import streamlit as st
 
 st.set_page_config(page_title="Portage salarial", page_icon="💼", layout="wide")
+
+sys.path.insert(0, ".")
+from utils.auth import require_auth
+require_auth()
 
 # =========================
 # Protection spécifique page

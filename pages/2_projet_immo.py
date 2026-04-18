@@ -1,6 +1,11 @@
 import streamlit as st
 import json
 import os
+import sys
+sys.path.insert(0, ".")
+from utils.auth import require_auth
+
+require_auth()
 
 st.title("🏠 Simulation projet immobilier (Couple avancé)")
 

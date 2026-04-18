@@ -30,16 +30,48 @@ if not st.session_state.authenticated:
     login_app()
     st.stop()
 
-st.title("📊 Application financière")
+# ── Page d'accueil ────────────────────────────────────────────────────────────
+st.title("📊 Application financière & pronostics")
+st.caption("Bienvenue ! Utilisez le menu à gauche pour naviguer entre les outils.")
 
-st.write("Utilise le menu à gauche pour naviguer :")
-st.write("- 💸 Charges")
-st.write("- 🏠 Projet immobilier")
-st.write("- 💼 Portage salarial")
+st.divider()
 
-st.info(
-    "La page Portage salarial est protégée par un second mot de passe spécifique."
-)
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("💸 Charges")
+    st.write(
+        "Suivi et répartition des charges du couple. "
+        "Saisissez vos dépenses mensuelles (loyer, alimentation, transport…) "
+        "et visualisez la répartition par catégorie et par personne."
+    )
+
+    st.subheader("🏠 Projet immobilier")
+    st.write(
+        "Simulateur d'achat immobilier pour couple. "
+        "Calcule la capacité d'emprunt, les mensualités, le coût total du crédit "
+        "et le reste à vivre selon vos revenus et vos charges actuelles."
+    )
+
+with col2:
+    st.subheader("💼 Portage salarial")
+    st.write(
+        "Simulation complète du portage salarial : calcul du salaire net à partir "
+        "du chiffre d'affaires, simulation des cotisations, frais de gestion, "
+        "charges patronales et salariales. Accès protégé par un second mot de passe."
+    )
+
+    st.subheader("⚽ Pronostics foot")
+    st.write(
+        "Analyse automatique des matchs du jour via FootMercato. "
+        "Agrège les probabilités du site (pré-match), les cotes bookmakers, "
+        "les votes communauté, la forme récente et le H2H pour produire "
+        "un signal de pari pondéré (1, N, 2, Double Chance, DNB). "
+        "Trois niveaux de confiance : ⭐ Premium · 🟢 Sûr · 🟡 Prudent. "
+        "Supporte le rendu JavaScript via Playwright pour une couverture maximale."
+    )
+
+st.divider()
 
 if st.button("Se déconnecter", key="logout_button"):
     st.session_state.authenticated = False
