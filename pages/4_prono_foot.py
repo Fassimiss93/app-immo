@@ -17,7 +17,7 @@ import json
 import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
@@ -1606,15 +1606,22 @@ with st.sidebar:
     today = date.today()
     date_option = st.radio(
         "Raccourcis",
-        ["Aujourd'hui", "Demain", "J+2", "Choisir une date"],
+        ["Aujourd'hui", "Demain", "J+2", "Cette semaine (7 jours)", "Choisir une date"],
         horizontal=False,
     )
+    week_mode = date_option == "Cette semaine (7 jours)"
     if date_option == "Aujourd'hui":
         target_date = today
+        target_dates = [today]
     elif date_option == "Demain":
         target_date = today + timedelta(days=1)
+        target_dates = [target_date]
     elif date_option == "J+2":
         target_date = today + timedelta(days=2)
+        target_dates = [target_date]
+    elif week_mode:
+        target_date = today
+        target_dates = [today + timedelta(days=i) for i in range(7)]
     else:
         target_date = st.date_input(
             "Date",
@@ -1622,8 +1629,12 @@ with st.sidebar:
             min_value=today - timedelta(days=7),
             max_value=today + timedelta(days=7),
         )
+        target_dates = [target_date]
 
-    st.info(f"📅 **{target_date.strftime('%A %d %B %Y')}**")
+    if week_mode:
+        st.info(f"📅 **{today.strftime('%d/%m')} → {(today + timedelta(days=6)).strftime('%d/%m/%Y')}** (7 jours)")
+    else:
+        st.info(f"📅 **{target_date.strftime('%A %d %B %Y')}**")
 
     st.divider()
 
@@ -1759,23 +1770,39 @@ Seuls les marchés ≥ 65 % sont affichés.
 """)
 
 # ── LANCEMENT ─────────────────────────────────────────────────────────────────
-run = st.button(
-    f"🚀 Analyser les matchs du {target_date.strftime('%d/%m/%Y')}",
-    type="primary",
-    use_container_width=True,
+btn_label = (
+    f"🚀 Analyser la semaine ({today.strftime('%d/%m')} → {(today + timedelta(days=6)).strftime('%d/%m')})"
+    if week_mode
+    else f"🚀 Analyser les matchs du {target_date.strftime('%d/%m/%Y')}"
 )
+run = st.button(btn_label, type="primary", use_container_width=True)
 
 if not run:
     st.stop()
 
-df, debug_info = build_dataframe(
-    target_date.isoformat(),
-    thresholds_hash,
-    use_playwright=use_playwright,
-    thresholds=T,
-    af_key=af_key,
-    odds_key=odds_key,
-)
+# ── Fetch : une date ou 7 jours agrégés ───────────────────────────────────────
+if week_mode:
+    all_dfs   = []
+    all_debug = {}
+    for d in target_dates:
+        st.markdown(f"#### 📅 {d.strftime('%A %d %B %Y')}")
+        day_df, day_debug = build_dataframe(
+            d.isoformat(), thresholds_hash,
+            use_playwright=use_playwright, thresholds=T,
+            af_key=af_key, odds_key=odds_key,
+        )
+        if not day_df.empty:
+            day_df.insert(0, "date", d.strftime("%d/%m"))
+            all_dfs.append(day_df)
+        all_debug[d.isoformat()] = day_debug
+    df       = pd.concat(all_dfs, ignore_index=True) if all_dfs else pd.DataFrame()
+    debug_info = all_debug
+else:
+    df, debug_info = build_dataframe(
+        target_date.isoformat(), thresholds_hash,
+        use_playwright=use_playwright, thresholds=T,
+        af_key=af_key, odds_key=odds_key,
+    )
 
 with st.expander("🔧 Debug", expanded=False):
     st.json(debug_info)
@@ -1783,6 +1810,17 @@ with st.expander("🔧 Debug", expanded=False):
 if df.empty:
     st.error("Aucun match trouvé. Vérifiez la connexion ou changez de date.")
     st.stop()
+
+# ── Exclure les matchs dont l'heure est passée (mode jour unique = aujourd'hui) ──
+if not week_mode and target_date == today:
+    now_str = datetime.now().strftime("%H:%M")
+    if "heure" in df.columns:
+        def _not_past(h):
+            try:
+                return str(h) >= now_str
+            except Exception:
+                return True
+        df = df[df["heure"].apply(_not_past)]
 
 # ── KPIs ──────────────────────────────────────────────────────────────────────
 total     = len(df)
