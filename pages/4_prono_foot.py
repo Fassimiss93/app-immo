@@ -77,12 +77,32 @@ DEFAULT_THRESHOLDS = {
 }
 
 WEIGHTS = {
-    "site_pre_match":  0.45,
-    "odds":            0.25,   # cotes = meilleur proxy du marché
-    "community_prono": 0.12,
-    "form":            0.12,
-    "h2h":             0.06,
+    "site_pre_match":  0.35,
+    "odds":            0.22,   # cotes bookmakers (FootMercato ou Odds API)
+    "community_prono": 0.09,
+    "form":            0.09,
+    "h2h":             0.05,
+    "api_football":    0.12,   # prédictions API-Football (si clé fournie)
+    "odds_ext":        0.08,   # cotes Odds API indépendantes (si clé fournie)
 }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 5 GRANDS CHAMPIONNATS
+# ──────────────────────────────────────────────────────────────────────────────
+MAJOR_LEAGUE_KEYWORDS = [
+    "premier league", "fa premier", "england",
+    "la liga", "primera division", "laliga", "spain", "espagne",
+    "bundesliga", "germany", "allemagne",
+    "serie a", "serie-a", "italy", "italie",
+    "ligue 1", "ligue un", "ligue1", "france",
+]
+
+MAJOR_LEAGUE_AF_IDS = [39, 78, 135, 140, 61]   # PL, Bundesliga, Serie A, La Liga, Ligue 1
+
+ODDS_API_SPORTS = [
+    "soccer_epl", "soccer_germany_bundesliga",
+    "soccer_italy_serie_a", "soccer_spain_la_liga", "soccer_france_ligue_one",
+]
 
 FORM_POINTS = {"V": 3, "N": 1, "D": 0}
 
@@ -936,6 +956,282 @@ def _extract_probabilities_from_json(data: Dict) -> Dict[str, Optional[Tuple]]:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# SOURCES EXTERNES — API-Football + The Odds API
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _norm_team(name: str) -> str:
+    import unicodedata
+    n = name.lower().strip()
+    n = "".join(c for c in unicodedata.normalize("NFD", n) if unicodedata.category(c) != "Mn")
+    for s in (" fc", " cf", " sc", " ac", " afc", " fk", " sk", " 1.", " vfb", " vfl", " tsv"):
+        n = n.replace(s, "")
+    return n.strip()
+
+def _sim(a: str, b: str) -> float:
+    a, b = _norm_team(a), _norm_team(b)
+    if a == b:              return 1.0
+    if a in b or b in a:   return 0.85
+    ta, tb = set(a.split()), set(b.split())
+    return len(ta & tb) / max(len(ta | tb), 1)
+
+def _match_score(h1: str, a1: str, h2: str, a2: str) -> float:
+    return (_sim(h1, h2) + _sim(a1, a2)) / 2
+
+def _row_triplet(row: "pd.Series", col_prefix: str) -> Optional[Tuple[float, float, float]]:
+    """Reconstruit un triplet depuis les colonnes _1/_X/_2 du DataFrame."""
+    v1 = row.get(f"{col_prefix}_1")
+    vx = row.get(f"{col_prefix}_X")
+    v2 = row.get(f"{col_prefix}_2")
+    try:
+        if v1 is not None and not pd.isna(v1):
+            return (float(v1), float(vx or 33.33), float(v2 or 33.33))
+    except Exception:
+        pass
+    return None
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_af_fixtures(date_str: str, api_key: str) -> List[Dict]:
+    """Récupère les matchs des 5 grands championnats via API-Football (5 appels max)."""
+    if not api_key:
+        return []
+    season = date_str[:4]
+    hdrs = {"x-rapidapi-key": api_key, "x-rapidapi-host": "v3.football.api-sports.io"}
+    fixtures: List[Dict] = []
+    for lid in MAJOR_LEAGUE_AF_IDS:
+        r = safe_get("https://v3.football.api-sports.io/fixtures",
+                     headers=hdrs, params={"date": date_str, "league": lid, "season": season})
+        if r:
+            try:
+                fixtures.extend(r.json().get("response", []))
+            except Exception:
+                pass
+        time.sleep(0.15)
+    return fixtures
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_af_prediction(fixture_id: int, api_key: str) -> Optional[Dict]:
+    """Prédiction API-Football pour un fixture (1 appel)."""
+    if not api_key:
+        return None
+    hdrs = {"x-rapidapi-key": api_key, "x-rapidapi-host": "v3.football.api-sports.io"}
+    r = safe_get("https://v3.football.api-sports.io/predictions",
+                 headers=hdrs, params={"fixture": fixture_id})
+    if r:
+        try:
+            resp = r.json().get("response", [])
+            return resp[0] if resp else None
+        except Exception:
+            pass
+    return None
+
+def _parse_af_probs(pred: Dict) -> Optional[Tuple[float, float, float]]:
+    try:
+        pct = pred.get("predictions", {}).get("percent", {})
+        h = float(pct.get("home", "0").replace("%", ""))
+        d = float(pct.get("draw", "0").replace("%", ""))
+        a = float(pct.get("away", "0").replace("%", ""))
+        if h + d + a > 0:
+            return normalize_triplet(h, d, a)
+    except Exception:
+        pass
+    return None
+
+def _parse_af_form(pred: Dict) -> Tuple[List[str], List[str]]:
+    MAP = {"W": "V", "D": "N", "L": "D"}
+    def _conv(s: str) -> List[str]:
+        return [MAP[c] for c in (s or "") if c in MAP][-5:]
+    try:
+        teams = pred.get("teams", {})
+        hf = teams.get("home", {}).get("league", {}).get("form", "")
+        af = teams.get("away", {}).get("league", {}).get("form", "")
+        return _conv(hf), _conv(af)
+    except Exception:
+        return [], []
+
+def _parse_af_h2h(pred: Dict) -> Optional[Tuple[float, float, float]]:
+    try:
+        h2h = pred.get("h2h", [])
+        if len(h2h) < 3:
+            return None
+        home_id = pred.get("teams", {}).get("home", {}).get("id")
+        wins_h = sum(1 for g in h2h if g.get("teams", {}).get("home", {}).get("winner") and
+                     g["teams"]["home"]["id"] == home_id)
+        wins_a = sum(1 for g in h2h if g.get("teams", {}).get("away", {}).get("winner") and
+                     g["teams"]["away"]["id"] != home_id)
+        draws  = len(h2h) - wins_h - wins_a
+        t = len(h2h)
+        return normalize_triplet(wins_h/t*100, draws/t*100, wins_a/t*100)
+    except Exception:
+        return None
+
+@st.cache_data(ttl=600, show_spinner=False)
+def _fetch_odds_api_games(date_str: str, api_key: str) -> List[Dict]:
+    """Récupère les cotes des 5 grands championnats via The Odds API (5 appels max)."""
+    if not api_key:
+        return []
+    games: List[Dict] = []
+    for sport in ODDS_API_SPORTS:
+        r = safe_get(
+            f"https://api.the-odds-api.com/v4/sports/{sport}/odds",
+            params={
+                "apiKey": api_key, "regions": "eu", "markets": "h2h",
+                "oddsFormat": "decimal",
+                "commenceTimeFrom": f"{date_str}T00:00:00Z",
+                "commenceTimeTo":   f"{date_str}T23:59:59Z",
+            },
+        )
+        if r and r.status_code == 200:
+            try:
+                data = r.json()
+                if isinstance(data, list):
+                    games.extend(data)
+            except Exception:
+                pass
+    return games
+
+def _parse_odds_game(game: Dict) -> Optional[Tuple[float, float, float]]:
+    """Convertit les cotes moyennes d'un game Odds API en triplet de probabilités."""
+    all_h, all_d, all_a = [], [], []
+    h_name = game.get("home_team", "")
+    a_name = game.get("away_team", "")
+    for bm in game.get("bookmakers", []):
+        for mkt in bm.get("markets", []):
+            if mkt.get("key") != "h2h":
+                continue
+            out = {o["name"]: o["price"] for o in mkt.get("outcomes", [])}
+            o1 = out.get(h_name)
+            o2 = out.get(a_name)
+            od = out.get("Draw")
+            if o1 and o2 and od and all(1.01 < x < 50 for x in (o1, od, o2)):
+                all_h.append(1/o1); all_d.append(1/od); all_a.append(1/o2)
+    if all_h:
+        h = sum(all_h)/len(all_h)
+        d = sum(all_d)/len(all_d)
+        a = sum(all_a)/len(all_a)
+        return normalize_triplet(h*100, d*100, a*100)
+    return None
+
+
+def _enrich_df_with_external(
+    df: "pd.DataFrame",
+    target_date: date,
+    af_key: str,
+    odds_key: str,
+    thresholds: Dict,
+) -> "pd.DataFrame":
+    """
+    Post-traitement : enrichit chaque ligne avec API-Football + Odds API.
+    Re-calcule weighted_triplet, decision_tree et estimate_goals si de nouvelles sources apparaissent.
+    """
+    if df.empty or (not af_key and not odds_key):
+        return df
+
+    date_str = target_date.isoformat()
+    af_fixtures = _fetch_af_fixtures(date_str, af_key)
+    odds_games  = _fetch_odds_api_games(date_str, odds_key)
+
+    COL_MAP = {
+        "site_pre_match":  "site_pre_match",
+        "community_prono": "community",
+        "h2h":             "h2h",
+        "form":            "form",
+        "odds":            "odds",
+    }
+
+    rows_out = []
+    for _, row in df.iterrows():
+        home = row.get("domicile", "")
+        away = row.get("exterieur", "")
+
+        # ── Reconstruire sources existantes ───────────────────────────────
+        sources: Dict[str, Optional[Tuple]] = {
+            k: _row_triplet(row, v) for k, v in COL_MAP.items()
+        }
+        added = False
+
+        # ── API-Football ──────────────────────────────────────────────────
+        if af_fixtures:
+            best_score, best_fix = 0.0, None
+            for fix in af_fixtures:
+                t = fix.get("teams", {})
+                sc = _match_score(home, away,
+                                  t.get("home", {}).get("name", ""),
+                                  t.get("away", {}).get("name", ""))
+                if sc > best_score:
+                    best_score, best_fix = sc, fix
+
+            if best_fix and best_score >= 0.60:
+                fid = best_fix.get("fixture", {}).get("id")
+                if fid and af_key:
+                    pred = _fetch_af_prediction(fid, af_key)
+                    if pred:
+                        af_probs = _parse_af_probs(pred)
+                        if af_probs:
+                            sources["api_football"] = af_probs
+                            added = True
+                        if not sources.get("form"):
+                            hf, af_ = _parse_af_form(pred)
+                            if hf or af_:
+                                sources["form"] = form_to_triplet(hf, af_)
+                                added = True
+                        if not sources.get("h2h"):
+                            h2h_t = _parse_af_h2h(pred)
+                            if h2h_t:
+                                sources["h2h"] = h2h_t
+                                added = True
+
+        # ── The Odds API ──────────────────────────────────────────────────
+        if odds_games:
+            best_score, best_game = 0.0, None
+            for g in odds_games:
+                sc = _match_score(home, away,
+                                  g.get("home_team", ""), g.get("away_team", ""))
+                if sc > best_score:
+                    best_score, best_game = sc, g
+
+            if best_game and best_score >= 0.55:
+                og_probs = _parse_odds_game(best_game)
+                if og_probs:
+                    # Remplace les cotes FootMercato (moins fiables) ou en complément
+                    if sources.get("odds") is None:
+                        sources["odds"] = og_probs
+                    else:
+                        sources["odds_ext"] = og_probs
+                    added = True
+
+        # ── Re-calcul si nouvelles sources ────────────────────────────────
+        if added:
+            p1, px, p2, conf, n_src = weighted_triplet(sources)
+            events = implied_events(p1, px, p2)
+            tree   = decision_tree(p1, px, p2, conf, n_src, home, away, thresholds)
+            goals  = estimate_goals(p1, px, p2)
+
+            row = row.copy()
+            row["proba_1"]   = p1
+            row["proba_X"]   = px
+            row["proba_2"]   = p2
+            row["confiance"] = conf
+            row["n_sources"] = n_src
+            for k, v in {**events, **tree, **goals}.items():
+                row[k] = v
+            if "api_football" in sources:
+                t = sources["api_football"]
+                row["af_1"] = round(t[0], 2)
+                row["af_X"] = round(t[1], 2)
+                row["af_2"] = round(t[2], 2)
+
+        rows_out.append(row)
+
+    result = pd.DataFrame(rows_out)
+    # Recalcule proba_plus_haute et sources_ok après enrichissement
+    if not result.empty:
+        result["proba_plus_haute"] = result[["proba_1", "proba_X", "proba_2"]].max(axis=1, skipna=True)
+        src_cols = ["site_pre_match_1", "community_1", "h2h_1", "form_1", "odds_1", "af_1"]
+        result["sources_ok"] = result[[c for c in src_cols if c in result.columns]].notna().sum(axis=1)
+    return result
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # MULTIPROCESSING PLAYWRIGHT — fonctions top-level (picklables)
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -1201,6 +1497,8 @@ def build_dataframe(
     thresholds_hash: str,
     use_playwright: bool = False,
     thresholds: Optional[Dict] = None,
+    af_key: str = "",
+    odds_key: str = "",
 ) -> Tuple[pd.DataFrame, Dict]:
     """
     Orchestre le pipeline en affichant la progression.
@@ -1269,6 +1567,15 @@ def build_dataframe(
         status.update(label=f"✅ {n} match(s) analysé(s) via {mode_label}.", state="complete")
 
     df = _finalize_dataframe(rows)
+
+    # ── Enrichissement sources externes (API-Football + Odds API) ─────────
+    if af_key or odds_key:
+        with st.spinner("🌐 Enrichissement via sources externes (API-Football / Odds API)…"):
+            df = _enrich_df_with_external(df, date.fromisoformat(target_date_iso), af_key, odds_key, T)
+            debug["external_enrichment"] = {
+                "api_football": bool(af_key),
+                "odds_api":     bool(odds_key),
+            }
 
     if "sources_ok" in df.columns:
         debug["with_at_least_1_source"] = int((df["sources_ok"] >= 1).sum())
@@ -1366,6 +1673,28 @@ with st.sidebar:
         )
 
     st.divider()
+    st.subheader("🌐 Sources externes (optionnel)")
+    st.caption("Clés API pour enrichir les probabilités. Laisse vide pour ignorer.")
+    af_key   = st.text_input("Clé API-Football (RapidAPI)", type="password",
+                              value=st.secrets.get("api_football_key", ""),
+                              help="Gratuit : 100 req/jour — rapidapi.com/api-sports/api/api-football")
+    odds_key = st.text_input("Clé The Odds API", type="password",
+                              value=st.secrets.get("odds_api_key", ""),
+                              help="Gratuit : 500 req/mois — the-odds-api.com")
+    if af_key:
+        st.success("✅ API-Football configurée")
+    if odds_key:
+        st.success("✅ The Odds API configurée")
+
+    st.divider()
+    st.subheader("🏆 Filtre championnats")
+    only_major = st.toggle(
+        "5 grands championnats uniquement",
+        value=False,
+        help="Premier League · La Liga · Bundesliga · Serie A · Ligue 1",
+    )
+
+    st.divider()
     if st.button("🗑️ Vider le cache", use_container_width=True):
         st.cache_data.clear()
         st.success("Cache vidé !")
@@ -1378,23 +1707,55 @@ st.caption(
 )
 
 # Légende
-with st.expander("📖 Légende", expanded=False):
+with st.expander("📖 Comment ça marche ?", expanded=False):
     st.markdown(f"""
-| Niveau | Conditions |
-|--------|-----------|
-| ⭐ **Premium** | Proba ≥ {T['premium_proba']} %, écart ≥ {T['premium_gap']:.0f} pts, confiance ≥ 60 % |
-| 🟢 **Sûr** | Proba ≥ {T['high_confidence_proba']} % **ou** (écart ≥ 10 pts et confiance ≥ 50 %) |
-| 🟡 **Prudent** | Proba ≥ {T['min_proba_bet']} % — peut être un DC ou DNB |
-| 🔴 **SKIP** | Proba < {T['min_proba_bet']} % **ou** confiance < {T['min_confidence']} % |
+### 🔍 Sources de données
 
-**Poids des sources :**
-{" · ".join(f"**{k}** {int(v*100)} %" for k,v in WEIGHTS.items())}
+**1. FootMercato (source principale)**
+L'app scrape footmercato.net pour chaque match : probabilités 1X2, cotes, pronos communauté, forme, H2H.
+FootMercato utilise React/JS — deux modes disponibles :
+- **⚡ Mode rapide (requests)** : HTML statique, rapide mais couverture partielle
+- **🎭 Mode Playwright** : navigateur Chromium headless, charge le JS → couverture maximale (~4 min)
 
-**⚠️ Note sur les données manquantes :**  
-FootMercato charge ses probabilités en JavaScript. Si 80 % des matchs sont vides,
-c'est que la page utilise un rendu dynamique (React/Next.js). Pour 100 % de couverture,
-il faut utiliser Playwright (navigateur headless). 
-Ajoutez `pip install playwright && playwright install chromium` et activez l'option ci-dessous.
+**2. API-Football** *(RapidAPI — 100 req/jour)*
+Probabilités officielles, forme récente, historique H2H issus de la base de données API-Football.
+
+**3. The Odds API** *(500 req/mois)*
+Cotes de vrais bookmakers → probabilités implicites du marché.
+
+---
+
+### ⚖️ Fusion des sources
+
+| Source | Poids |
+|--------|-------|
+| Probabilités FootMercato | 35 % |
+| Cotes FootMercato | 22 % |
+| API-Football | 12 % |
+| The Odds API | 8 % |
+| Communauté | 9 % |
+| Forme | 9 % |
+| H2H | 5 % |
+
+---
+
+### 🎯 Niveaux de décision
+
+| Niveau | Conditions | Action |
+|--------|-----------|--------|
+| ⭐ **Premium** | Proba ≥ {T['premium_proba']} %, écart ≥ {T['premium_gap']:.0f} pts, confiance ≥ 60 % | ✅ Mise pleine |
+| 🟢 **Sûr** | Proba ≥ {T['high_confidence_proba']} % ou (écart ≥ 10 pts et confiance ≥ 50 %) | ✅ Mise normale |
+| 🟡 **Prudent** | Proba ≥ {T['min_proba_bet']} % — DC ou DNB possible | ⚠️ Mise réduite |
+| 🔴 **SKIP** | Proba < {T['min_proba_bet']} % ou confiance < {T['min_confidence']} % | ❌ Ne pas parier |
+
+La **confiance** mesure l'écart entre la meilleure probabilité et les autres issues — plus l'écart est grand, plus le signal est fiable.
+
+---
+
+### ⚽ Paris sur les buts
+
+Un **modèle Poisson** estime le nombre de buts attendus à partir des probas 1X2, et calcule la probabilité de chaque marché : Over/Under 0.5 à 4.5, BTTS Oui/Non.
+Seuls les marchés ≥ 65 % sont affichés.
 """)
 
 # ── LANCEMENT ─────────────────────────────────────────────────────────────────
@@ -1412,6 +1773,8 @@ df, debug_info = build_dataframe(
     thresholds_hash,
     use_playwright=use_playwright,
     thresholds=T,
+    af_key=af_key,
+    odds_key=odds_key,
 )
 
 with st.expander("🔧 Debug", expanded=False):
@@ -1437,6 +1800,13 @@ st.divider()
 
 # ── Filtrage ──────────────────────────────────────────────────────────────────
 filtered = df.copy()
+if only_major and "competition" in filtered.columns:
+    def _is_major(comp):
+        if not comp:
+            return False
+        c = comp.lower()
+        return any(kw in c for kw in MAJOR_LEAGUE_KEYWORDS)
+    filtered = filtered[filtered["competition"].apply(_is_major)]
 if filter_niveau and "niveau" in filtered.columns:
     filtered = filtered[filtered["niveau"].isin(filter_niveau)]
 if "sources_ok" in filtered.columns:
