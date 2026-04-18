@@ -1,0 +1,101 @@
+{
+  "fiscal_year": 2025,
+  "data": [
+    {
+      "Année": 2025,
+      "Mois": "Octobre",
+      "Mois_num": 10,
+      "Jours travaillés": 23.0,
+      "TJM": 500.0,
+      "Frais remboursés": 0.0
+    },
+    {
+      "Année": 2025,
+      "Mois": "Novembre",
+      "Mois_num": 11,
+      "Jours travaillés": 18.0,
+      "TJM": 500.0,
+      "Frais remboursés": 0.0
+    },
+    {
+      "Année": 2025,
+      "Mois": "Décembre",
+      "Mois_num": 12,
+      "Jours travaillés": 10.0,
+      "TJM": 500.0,
+      "Frais remboursés": 0.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Janvier",
+      "Mois_num": 1,
+      "Jours travaillés": 15.0,
+      "TJM": 500.0,
+      "Frais remboursés": 0.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Février",
+      "Mois_num": 2,
+      "Jours travaillés": 20.0,
+      "TJM": 500.0,
+      "Frais remboursés": 4298.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Mars",
+      "Mois_num": 3,
+      "Jours travaillés": 22.0,
+      "TJM": 500.0,
+      "Frais remboursés": 4316.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Avril",
+      "Mois_num": 4,
+      "Jours travaillés": 20.0,
+      "TJM": 500.0,
+      "Frais remboursés": 1000.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Mai",
+      "Mois_num": 5,
+      "Jours travaillés": 10.0,
+      "TJM": 500.0,
+      "Frais remboursés": 700.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Juin",
+      "Mois_num": 6,
+      "Jours travaillés": 22.0,
+      "TJM": 500.0,
+      "Frais remboursés": 700.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Juillet",
+      "Mois_num": 7,
+      "Jours travaillés": 17.0,
+      "TJM": 500.0,
+      "Frais remboursés": 700.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Août",
+      "Mois_num": 8,
+      "Jours travaillés": 20.0,
+      "TJM": 500.0,
+      "Frais remboursés": 4200.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Septembre",
+      "Mois_num": 9,
+      "Jours travaillés": 20.0,
+      "TJM": 500.0,
+      "Frais remboursés": 700.0
+    }
+  ]
+}

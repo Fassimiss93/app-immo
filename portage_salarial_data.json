@@ -1,0 +1,109 @@
+{
+  "settings": {
+    "fiscal_start_year": 2025,
+    "management_fee_rate": 0.04,
+    "employer_charges_rate": 0.48007407061606217,
+    "employee_charges_rate": 0.21009867931113438,
+    "net_taxable_rate": 0.8188293196929581,
+    "pas_rate": 0.09399934300366779,
+    "default_tjm": 500.0
+  },
+  "cra": [
+    {
+      "Année": 2025,
+      "Mois": "Octobre",
+      "Mois_num": 10,
+      "Jours travaillés": 0.0,
+      "TJM": 500.0,
+      "Frais remboursés": 0.0
+    },
+    {
+      "Année": 2025,
+      "Mois": "Novembre",
+      "Mois_num": 11,
+      "Jours travaillés": 0.0,
+      "TJM": 500.0,
+      "Frais remboursés": 0.0
+    },
+    {
+      "Année": 2025,
+      "Mois": "Décembre",
+      "Mois_num": 12,
+      "Jours travaillés": 0.0,
+      "TJM": 500.0,
+      "Frais remboursés": 0.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Janvier",
+      "Mois_num": 1,
+      "Jours travaillés": 0.0,
+      "TJM": 500.0,
+      "Frais remboursés": 0.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Février",
+      "Mois_num": 2,
+      "Jours travaillés": 0.0,
+      "TJM": 500.0,
+      "Frais remboursés": 0.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Mars",
+      "Mois_num": 3,
+      "Jours travaillés": 0.0,
+      "TJM": 500.0,
+      "Frais remboursés": 0.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Avril",
+      "Mois_num": 4,
+      "Jours travaillés": 0.0,
+      "TJM": 500.0,
+      "Frais remboursés": 0.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Mai",
+      "Mois_num": 5,
+      "Jours travaillés": 0.0,
+      "TJM": 500.0,
+      "Frais remboursés": 0.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Juin",
+      "Mois_num": 6,
+      "Jours travaillés": 0.0,
+      "TJM": 500.0,
+      "Frais remboursés": 0.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Juillet",
+      "Mois_num": 7,
+      "Jours travaillés": 0.0,
+      "TJM": 500.0,
+      "Frais remboursés": 0.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Août",
+      "Mois_num": 8,
+      "Jours travaillés": 0.0,
+      "TJM": 500.0,
+      "Frais remboursés": 0.0
+    },
+    {
+      "Année": 2026,
+      "Mois": "Septembre",
+      "Mois_num": 9,
+      "Jours travaillés": 0.0,
+      "TJM": 500.0,
+      "Frais remboursés": 0.0
+    }
+  ]
+}
